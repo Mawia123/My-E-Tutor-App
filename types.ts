@@ -1,8 +1,7 @@
 
 export enum UserRole {
   STUDENT = 'STUDENT',
-  TUTOR = 'TUTOR',
-  ADMIN = 'ADMIN'
+  TUTOR = 'TUTOR'
 }
 
 export enum SessionStatus {
@@ -23,13 +22,14 @@ export interface User {
   fullName: string;
   email: string;
   role: UserRole;
-  password?: string;
   bio?: string;
   academicHistory?: string;
   subjects?: string[];
   rating?: number;
   totalSessions?: number;
   isApproved?: boolean;
+  minimumNoticeHours?: number;
+  acceptsShortNoticeRequests?: boolean;
   isActive: boolean;
   avatar?: string;
 }
@@ -39,6 +39,7 @@ export interface TutoringSession {
   studentId: string;
   tutorId: string;
   subject: string;
+  unit?: string;
   date: string;
   time: string;
   duration: number; // in minutes
@@ -46,6 +47,7 @@ export interface TutoringSession {
   notes?: string;
   feedback?: string;
   rating?: number;
+  reviewIsAnonymous?: boolean;
   cancellationReason?: string;
   rescheduleOptions?: RescheduleOption[];
   createdAt: number;

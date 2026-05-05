@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { UserRole } from '../types';
+import { api } from '../services/api';
 
 interface RegisterProps {
   onBack: () => void;
@@ -17,36 +18,13 @@ export const Register: React.FC<RegisterProps> = ({ onBack }) => {
 
   const handleRegister = async () => {
     try {
-      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
-      if (!API_URL) throw new Error("API URL not configured. Set VITE_API_URL in .env");
-      console.log("API URL:", API_URL);
-
-      const response = await fetch(`${API_URL}/users`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          name: formData.fullName,
-          email: formData.email,
-          password: formData.password,
-          role: formData.role
-        })
+      const result = await api.createUser({
+        name: formData.fullName,
+        email: formData.email,
+        password: formData.password,
+        role: formData.role,
       });
 
-      if (!response.ok) {
-        let errorText = "Unknown server error";
-        try {
-          const errorData = await response.json();
-          errorText = JSON.stringify(errorData);
-        } catch {
-          const plainText = await response.text();
-          errorText = plainText || `HTTP ${response.status} ${response.statusText}`;
-        }
-        throw new Error(errorText);
-      }
-
-      const result = await response.json();
       console.log("Registration successful:", result);
       alert("Registration successful. Please login.");
       onBack();
@@ -57,7 +35,7 @@ export const Register: React.FC<RegisterProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col p-6 max-w-md mx-auto shadow-xl">
+    <div className="w-full min-h-dvh bg-white flex flex-col p-6 sm:max-w-md sm:mx-auto sm:min-h-screen sm:shadow-xl">
       <button onClick={onBack} className="text-emerald-600 mb-8 flex items-center gap-1 font-semibold">
         ← Back to Login
       </button>

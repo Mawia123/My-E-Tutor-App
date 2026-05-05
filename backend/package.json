@@ -4,8 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-  "start": "node index.js"
-},
+    "start": "node index.js",
+    "delete:user": "node scripts/delete-user.js"
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",

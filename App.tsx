@@ -6,7 +6,6 @@ import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 import { StudentDashboard } from './pages/StudentDashboard';
 import { TutorDashboard } from './pages/TutorDashboard';
-import { AdminDashboard } from './pages/AdminDashboard';
 import { SearchTutors } from './pages/SearchTutors';
 import { ChatList } from './pages/ChatList';
 import { Profile } from './pages/Profile';
@@ -17,39 +16,116 @@ const App: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<'login' | 'register' | 'app'>('login');
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
   const [selectedProfileUser, setSelectedProfileUser] = useState<User | null>(null);
+  const [profileReturnTab, setProfileReturnTab] = useState<string>('search');
+  const [pendingBookingTutor, setPendingBookingTutor] = useState<User | null>(null);
+  const [pendingChatUser, setPendingChatUser] = useState<User | null>(null);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
+  const [isChatConversationOpen, setIsChatConversationOpen] = useState(false);
 
-  // Load user from session if available
+  const refreshUnreadMessageCount = async (userId: string) => {
+    try {
+      const messages = await api.getMessages();
+      const unreadCount = messages.filter(message => message.receiverId === userId && !message.read).length;
+      setUnreadMessageCount(unreadCount);
+    } catch (error) {
+      console.error('Failed to refresh unread messages:', error);
+    }
+  };
+
   useEffect(() => {
-    const savedUser = sessionStorage.getItem('logged_user');
-    if (savedUser) {
-      const parsedUser = JSON.parse(savedUser);
+    api.getCurrentUser()
+      .then(currentUser => {
+        setUser(currentUser);
+        setCurrentPage('app');
+      })
+      .catch(() => {
+        setUser(null);
+        setCurrentPage('login');
+      });
+  }, []);
+
+  useEffect(() => {
+    if (currentPage !== 'app' || currentTab !== 'profile' || !user?.id) return;
+
+    api.getUsers()
+      .then(users => {
+        const latestUser = users.find(entry => entry.id === user.id);
+        if (!latestUser) return;
+
+        setUser(currentUser => {
+          if (!currentUser || currentUser.id !== latestUser.id) {
+            return currentUser;
+          }
+
+          return latestUser;
+        });
+      })
+      .catch(error => {
+        console.error('Failed to refresh profile user:', error);
+      });
+  }, [currentPage, currentTab, user?.id]);
+
+  useEffect(() => {
+    if (currentPage !== 'app' || !user?.id) return;
+
+    const refreshCurrentUser = () => {
       api.getUsers()
         .then(users => {
-          const latestUser = users.find(entry => entry.id === parsedUser.id) || parsedUser;
-          setUser(latestUser);
-          sessionStorage.setItem('logged_user', JSON.stringify(latestUser));
-          setCurrentPage('app');
+          const latestUser = users.find(entry => entry.id === user.id);
+          if (!latestUser) return;
+
+          setUser(currentUser => {
+            if (!currentUser || currentUser.id !== latestUser.id) {
+              return currentUser;
+            }
+
+            return latestUser;
+          });
         })
-        .catch(() => {
-          setUser(parsedUser);
-          setCurrentPage('app');
+        .catch(error => {
+          console.error('Failed to refresh current user:', error);
         });
+    };
+
+    refreshCurrentUser();
+    const intervalId = window.setInterval(refreshCurrentUser, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [currentPage, user?.id]);
+
+  useEffect(() => {
+    if (currentPage !== 'app' || !user?.id) {
+      setUnreadMessageCount(0);
+      return;
     }
-  }, []);
+
+    void refreshUnreadMessageCount(user.id);
+    const intervalId = window.setInterval(() => {
+      void refreshUnreadMessageCount(user.id);
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [currentPage, user?.id]);
 
   const handleLogin = (u: User) => {
     setUser(u);
-    sessionStorage.setItem('logged_user', JSON.stringify(u));
     setCurrentPage('app');
     setCurrentTab('dashboard');
     setSelectedProfileUser(null);
+    setProfileReturnTab('dashboard');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await api.logout();
+    } catch (error) {
+      console.error('Failed to logout cleanly:', error);
+    }
+
     setUser(null);
-    sessionStorage.removeItem('logged_user');
     setCurrentPage('login');
     setSelectedProfileUser(null);
+    setProfileReturnTab('search');
   };
 
   const handleProfileUpdate = async (updates: Partial<User>) => {
@@ -57,19 +133,37 @@ const App: React.FC = () => {
 
     const updatedUser = await api.updateUser(user.id, updates);
     setUser(updatedUser);
-    sessionStorage.setItem('logged_user', JSON.stringify(updatedUser));
   };
 
   const handleTabChange = (tab: string) => {
     if (tab !== 'tutor-profile') {
       setSelectedProfileUser(null);
     }
+    if (tab !== 'search') {
+      setPendingBookingTutor(null);
+    }
+    if (tab !== 'chat') {
+      setPendingChatUser(null);
+      setIsChatConversationOpen(false);
+    }
     setCurrentTab(tab);
   };
 
   const handleViewTutorProfile = (tutor: User) => {
     setSelectedProfileUser(tutor);
+    setProfileReturnTab(currentTab);
     setCurrentTab('tutor-profile');
+  };
+
+  const handleViewChatProfile = (profileUser: User) => {
+    setSelectedProfileUser(profileUser);
+    setProfileReturnTab('chat');
+    setCurrentTab('tutor-profile');
+  };
+
+  const handleOpenChat = (chatUser: User) => {
+    setPendingChatUser(chatUser);
+    setCurrentTab('chat');
   };
 
   const renderAppContent = () => {
@@ -77,15 +171,36 @@ const App: React.FC = () => {
 
     switch (currentTab) {
       case 'dashboard':
-        if (user.role === UserRole.ADMIN) return <AdminDashboard user={user} />;
-        if (user.role === UserRole.TUTOR) return <TutorDashboard user={user} />;
-        return <StudentDashboard user={user} setTab={handleTabChange} onViewTutorProfile={handleViewTutorProfile} />;
+        if (user.role === UserRole.TUTOR) {
+          return <TutorDashboard user={user} onOpenChat={handleOpenChat} />;
+        }
+        return (
+          <StudentDashboard
+            user={user}
+            setTab={handleTabChange}
+            onViewTutorProfile={handleViewTutorProfile}
+            onOpenChat={handleOpenChat}
+          />
+        );
       case 'search':
-        return <SearchTutors user={user} onViewTutorProfile={handleViewTutorProfile} />;
+        return (
+          <SearchTutors
+            user={user}
+            onViewTutorProfile={handleViewTutorProfile}
+            initialBookingTutor={pendingBookingTutor}
+            onInitialBookingHandled={() => setPendingBookingTutor(null)}
+          />
+        );
       case 'chat':
-        return <ChatList user={user} />;
-      case 'users':
-        return <AdminDashboard user={user} showUsersOnly={true} />;
+        return (
+          <ChatList
+            user={user}
+            onViewProfile={handleViewChatProfile}
+            initialChatUser={pendingChatUser}
+            onMessagesUpdated={() => void refreshUnreadMessageCount(user.id)}
+            onActiveConversationChange={setIsChatConversationOpen}
+          />
+        );
       case 'profile':
         return <Profile user={user} onLogout={handleLogout} onProfileUpdate={handleProfileUpdate} />;
       case 'tutor-profile':
@@ -96,10 +211,15 @@ const App: React.FC = () => {
           <Profile
             user={selectedProfileUser}
             mode="viewer"
-            viewerLabel="Tutor Profile"
+            viewerLabel={selectedProfileUser.role === UserRole.TUTOR ? 'Tutor Profile' : 'Student Profile'}
+            onBookTutor={(tutor) => {
+              setPendingBookingTutor(tutor);
+              setSelectedProfileUser(null);
+              setCurrentTab('search');
+            }}
             onBack={() => {
               setSelectedProfileUser(null);
-              handleTabChange('search');
+              handleTabChange(profileReturnTab);
             }}
             onLogout={handleLogout}
             onProfileUpdate={handleProfileUpdate}
@@ -119,7 +239,7 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative shadow-xl">
+    <div className="w-full min-h-dvh bg-gray-50 flex flex-col relative overflow-x-hidden sm:max-w-md sm:mx-auto sm:min-h-screen sm:shadow-xl">
       <header className="bg-emerald-600 text-white p-4 sticky top-0 z-40 shadow-sm">
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-bold tracking-tight">PeerTutoringPro</h1>
@@ -131,15 +251,16 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="flex-1 pb-20 overflow-y-auto">
+      <main className={`flex-1 overflow-y-auto overflow-x-hidden ${isChatConversationOpen ? 'pb-0' : 'pb-24'}`}>
         {renderAppContent()}
       </main>
 
-      {user && (
+      {user && !isChatConversationOpen && (
         <BottomNav 
           currentTab={currentTab} 
           setTab={handleTabChange} 
           role={user.role} 
+          unreadMessageCount={unreadMessageCount}
         />
       )}
     </div>

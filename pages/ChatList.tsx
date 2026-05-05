@@ -1,9 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { User, ChatMessage, UserRole } from '../types';
 import { api } from '../services/api';
 
 interface ChatProps {
   user: User; 
+  onViewProfile: (profileUser: User) => void;
+  initialChatUser?: User | null;
+  onMessagesUpdated?: () => void;
+  onActiveConversationChange?: (isActive: boolean) => void;
 }
 
 const ChatAvatar: React.FC<{ avatar?: string; name?: string; className: string }> = ({ avatar, name, className }) => {
@@ -21,12 +25,13 @@ const ChatAvatar: React.FC<{ avatar?: string; name?: string; className: string }
   );
 };
 
-export const ChatList: React.FC<ChatProps> = ({ user }) => {
+export const ChatList: React.FC<ChatProps> = ({ user, onViewProfile, initialChatUser, onMessagesUpdated, onActiveConversationChange }) => {
   const [activeChatId, setActiveChatId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [inputText, setInputText] = useState('');
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const markingReadIdsRef = useRef<Set<string>>(new Set());
 
   const loadData = async () => {
     try {
@@ -55,18 +60,100 @@ export const ChatList: React.FC<ChatProps> = ({ user }) => {
     ...messages.filter(message => message.receiverId === user.id).map(message => message.senderId),
   ]));
 
-  const chatUsers = users.filter(entry => chatUsersIds.includes(entry.id));
+  const getLatestMessageForUser = (chatUserId: string) =>
+    messages
+      .filter(message =>
+        (message.senderId === user.id && message.receiverId === chatUserId) ||
+        (message.receiverId === user.id && message.senderId === chatUserId)
+      )
+      .sort((a, b) => b.timestamp - a.timestamp)[0];
+
+  const getMessagePreview = (message?: ChatMessage) => {
+    if (!message) return 'No messages yet';
+    return message.senderId === user.id ? `You: ${message.text}` : message.text;
+  };
+
+  const chatUsers = users
+    .filter(entry => chatUsersIds.includes(entry.id))
+    .sort((first, second) => {
+      const firstLatest = getLatestMessageForUser(first.id)?.timestamp || 0;
+      const secondLatest = getLatestMessageForUser(second.id)?.timestamp || 0;
+      return secondLatest - firstLatest;
+    });
   const availableChatUsers = users.filter(entry => {
     if (entry.id === user.id || !entry.isActive) return false;
     if (user.role === UserRole.STUDENT) return entry.role === UserRole.TUTOR && !!entry.isApproved;
     if (user.role === UserRole.TUTOR) return entry.role === UserRole.STUDENT;
-    return entry.role !== UserRole.ADMIN;
+    return false;
   });
+
+  const markConversationAsRead = async (chatUserId: string) => {
+    const unreadIncomingMessages = messages.filter(message =>
+      message.senderId === chatUserId &&
+      message.receiverId === user.id &&
+      !message.read &&
+      !markingReadIdsRef.current.has(message.id)
+    );
+
+    if (unreadIncomingMessages.length === 0) return;
+
+    unreadIncomingMessages.forEach(message => markingReadIdsRef.current.add(message.id));
+    setMessages(current =>
+      current.map(message =>
+        unreadIncomingMessages.some(unreadMessage => unreadMessage.id === message.id)
+          ? { ...message, read: true }
+          : message
+      )
+    );
+
+    try {
+      const updatedMessages = await Promise.all(
+        unreadIncomingMessages.map(message => api.updateMessage(message.id, { read: true }))
+      );
+
+      setMessages(current =>
+        current.map(message => updatedMessages.find(updated => updated.id === message.id) || message)
+      );
+      onMessagesUpdated?.();
+    } catch (error) {
+      console.error('Failed to mark messages as read:', error);
+      setMessages(current =>
+        current.map(message =>
+          unreadIncomingMessages.find(unreadMessage => unreadMessage.id === message.id)
+            ? { ...message, read: false }
+            : message
+        )
+      );
+    } finally {
+      unreadIncomingMessages.forEach(message => markingReadIdsRef.current.delete(message.id));
+    }
+  };
 
   const openChatWithUser = (chatUserId: string) => {
     setActiveChatId(chatUserId);
     setIsPickerOpen(false);
+    void markConversationAsRead(chatUserId);
   };
+
+  useEffect(() => {
+    if (!initialChatUser?.id) return;
+
+    openChatWithUser(initialChatUser.id);
+  }, [initialChatUser?.id]);
+
+  useEffect(() => {
+    if (!activeChatId) return;
+
+    void markConversationAsRead(activeChatId);
+  }, [activeChatId, messages, user.id]);
+
+  useEffect(() => {
+    onActiveConversationChange?.(Boolean(activeChatId));
+
+    return () => {
+      onActiveConversationChange?.(false);
+    };
+  }, [activeChatId, onActiveConversationChange]);
 
   const handleSendMessage = async () => {
     if (!inputText.trim() || !activeChatId) return;
@@ -84,6 +171,7 @@ export const ChatList: React.FC<ChatProps> = ({ user }) => {
       const created = await api.createMessage(newMessage);
       setMessages(current => [...current, created]);
       setInputText('');
+      onMessagesUpdated?.();
     } catch (error) {
       console.error('Failed to send message:', error);
       alert('Failed to send the message.');
@@ -100,16 +188,22 @@ export const ChatList: React.FC<ChatProps> = ({ user }) => {
 
   if (activeChatId) {
     return (
-      <div className="flex flex-col h-[calc(100vh-8rem)] bg-white">
+      <div className="flex min-h-[calc(100dvh-4rem)] flex-col bg-white">
         <header className="p-4 border-b border-gray-100 flex items-center gap-3">
           <button onClick={() => setActiveChatId(null)} className="text-gray-400 text-xl leading-none">
             &larr;
           </button>
           <ChatAvatar avatar={activeUser?.avatar} name={activeUser?.fullName} className="w-8 h-8 rounded-full" />
-          <h3 className="font-bold text-sm">{activeUser?.fullName}</h3>
+          <button
+            type="button"
+            onClick={() => activeUser && onViewProfile(activeUser)}
+            className="font-bold text-sm text-left text-gray-900 hover:text-emerald-700 transition-colors"
+          >
+            {activeUser?.fullName}
+          </button>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 pb-24 space-y-4">
           {currentMessages.map(message => (
             <div key={message.id} className={`flex ${message.senderId === user.id ? 'justify-end' : 'justify-start'}`}>
               <div
@@ -128,7 +222,7 @@ export const ChatList: React.FC<ChatProps> = ({ user }) => {
           )}
         </div>
 
-        <div className="p-4 border-t border-gray-100 bg-white sticky bottom-0">
+        <div className="sticky bottom-0 z-10 border-t border-gray-100 bg-white p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <div className="flex gap-2">
             <input
               type="text"
@@ -154,42 +248,61 @@ export const ChatList: React.FC<ChatProps> = ({ user }) => {
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-xl font-bold">Messages</h2>
-        {user.role !== UserRole.ADMIN && (
-          <button
-            onClick={() => setIsPickerOpen(true)}
-            className="bg-emerald-600 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-sm hover:bg-emerald-700 transition-colors"
-          >
-            Start Chat
-          </button>
-        )}
+        <button
+          onClick={() => setIsPickerOpen(true)}
+          className="bg-emerald-600 text-white text-sm font-bold px-4 py-2 rounded-xl shadow-sm hover:bg-emerald-700 transition-colors"
+        >
+          Start Chat
+        </button>
       </div>
 
       {chatUsers.length > 0 ? (
         <div className="space-y-1">
           {chatUsers.map(chatUser => {
-            const lastMessage = messages
-              .filter(message =>
-                (message.senderId === user.id && message.receiverId === chatUser.id) ||
-                (message.receiverId === user.id && message.senderId === chatUser.id)
-              )
-              .sort((a, b) => a.timestamp - b.timestamp)
-              .pop();
+            const lastMessage = getLatestMessageForUser(chatUser.id);
+            const unreadCount = messages.filter(message =>
+              message.senderId === chatUser.id &&
+              message.receiverId === user.id &&
+              !message.read
+            ).length;
 
             return (
               <button
                 key={chatUser.id}
                 onClick={() => openChatWithUser(chatUser.id)}
-                className="w-full flex items-center gap-4 p-4 hover:bg-white rounded-3xl transition-all"
+                className={`w-full flex items-center gap-4 p-4 rounded-3xl transition-all ${
+                  unreadCount > 0 ? 'bg-emerald-50 hover:bg-emerald-100' : 'hover:bg-white'
+                }`}
               >
                 <ChatAvatar avatar={chatUser.avatar} name={chatUser.fullName} className="w-12 h-12 rounded-full" />
                 <div className="flex-1 text-left">
                   <div className="flex justify-between gap-3">
-                    <h4 className="font-bold text-sm text-gray-900">{chatUser.fullName}</h4>
-                    <span className="text-[10px] text-gray-400">
-                      {lastMessage ? new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                    </span>
+                    <button
+                      type="button"
+                      onClick={event => {
+                        event.stopPropagation();
+                        onViewProfile(chatUser);
+                      }}
+                      className={`font-bold text-sm text-left transition-colors hover:text-emerald-700 ${
+                        unreadCount > 0 ? 'text-gray-900' : 'text-gray-800'
+                      }`}
+                    >
+                      {chatUser.fullName}
+                    </button>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-gray-400">
+                        {lastMessage ? new Date(lastMessage.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                      </span>
+                      {unreadCount > 0 && (
+                        <span className="min-w-5 h-5 px-1 rounded-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center">
+                          {unreadCount}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <p className="text-xs text-gray-500 line-clamp-1">{lastMessage?.text || 'No messages yet'}</p>
+                  <p className={`text-xs line-clamp-1 ${unreadCount > 0 ? 'text-gray-900 font-semibold' : 'text-gray-500'}`}>
+                    {getMessagePreview(lastMessage)}
+                  </p>
                 </div>
               </button>
             );
@@ -200,14 +313,12 @@ export const ChatList: React.FC<ChatProps> = ({ user }) => {
           <div className="text-5xl mb-4 text-gray-200">Chat</div>
           <h3 className="text-gray-900 font-bold mb-1">No Messages Yet</h3>
           <p className="text-gray-500 text-xs">Reach out to a tutor or student to start chatting about your sessions.</p>
-          {user.role !== UserRole.ADMIN && (
-            <button
-              onClick={() => setIsPickerOpen(true)}
-              className="mt-5 bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-xl shadow-sm hover:bg-emerald-700 transition-colors"
-            >
-              Start Chat
-            </button>
-          )}
+          <button
+            onClick={() => setIsPickerOpen(true)}
+            className="mt-5 bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-xl shadow-sm hover:bg-emerald-700 transition-colors"
+          >
+            Start Chat
+          </button>
         </div>
       )}
 

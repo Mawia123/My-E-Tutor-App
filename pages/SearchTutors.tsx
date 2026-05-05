@@ -1,55 +1,46 @@
 import React, { useEffect, useState } from 'react';
-import { User, SessionStatus, UserRole } from '../types';
-import { SUBJECTS } from '../constants';
-import { getGeminiAssistance } from '../services/geminiService';
+import { User, SessionStatus, TutoringSession, UserRole } from '../types';
+import { getUnitsForSubject, SUBJECTS } from '../constants';
 import { api } from '../services/api';
+import { getTutorDailyTimetable, isPastSessionTime, isShortNoticeSession, meetsMinimumNoticeHours, SHORT_NOTICE_WINDOW_HOURS, isTutorAvailableForSlot } from '../services/schedule';
 
 interface SearchProps {
   user: User;
   onViewTutorProfile: (tutor: User) => void;
+  initialBookingTutor?: User | null;
+  onInitialBookingHandled?: () => void;
 }
 
-export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }) => {
+export const SearchTutors: React.FC<SearchProps> = ({
+  user,
+  onViewTutorProfile,
+  initialBookingTutor,
+  onInitialBookingHandled,
+}) => {
   const [selectedSubject, setSelectedSubject] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [bookingTutor, setBookingTutor] = useState<User | null>(null);
-  const [bookingData, setBookingData] = useState({ subject: '', date: '', time: '', duration: 60, notes: '' });
-  const [aiLoading, setAiLoading] = useState(false);
+  const [bookingData, setBookingData] = useState({ subject: '', unit: '', customUnit: '', date: '', time: '', duration: 60, notes: '' });
   const [allTutors, setAllTutors] = useState<User[]>([]);
+  const [sessions, setSessions] = useState<TutoringSession[]>([]);
   const [loadingTutors, setLoadingTutors] = useState(true);
+  const [slotConflict, setSlotConflict] = useState<TutoringSession | null>(null);
+  const [checkingSlotConflict, setCheckingSlotConflict] = useState(false);
+  const [slotConflictError, setSlotConflictError] = useState('');
 
   useEffect(() => {
-    const normalizeTutor = (rawUser: any): User => ({
-      id: rawUser.id?.toString() || Math.random().toString(36).substr(2, 9),
-      fullName: rawUser.fullName || rawUser.name || '',
-      email: rawUser.email || '',
-      role: rawUser.role as UserRole,
-      password: rawUser.password,
-      bio: rawUser.bio || '',
-      subjects: Array.isArray(rawUser.subjects) ? rawUser.subjects : [],
-      rating: rawUser.rating || 0,
-      totalSessions: rawUser.totalSessions || 0,
-      isApproved: rawUser.isApproved === true || rawUser.approved === 1,
-      isActive: rawUser.isActive !== false,
-      avatar: rawUser.avatar || '',
-    });
-
     const loadTutors = async () => {
       setLoadingTutors(true);
       try {
-        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
-        const response = await fetch(`${API_URL}/tutors`);
-        if (!response.ok) throw new Error('Failed to fetch tutors');
-
-        const users = await response.json();
-        const backendTutors = users
-          .map(normalizeTutor)
-          .filter((u: User) => u.role === UserRole.TUTOR && u.isApproved && u.isActive);
+        const [users, allSessions] = await Promise.all([api.getTutors(), api.getSessions()]);
+        const backendTutors = users.filter((u: User) => u.role === UserRole.TUTOR && u.isApproved && u.isActive);
 
         setAllTutors(backendTutors);
+        setSessions(allSessions);
       } catch (error) {
         console.error('Error loading tutors:', error);
         setAllTutors([]);
+        setSessions([]);
       } finally {
         setLoadingTutors(false);
       }
@@ -58,16 +49,145 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
     loadTutors();
   }, []);
 
+  useEffect(() => {
+    if (!initialBookingTutor) return;
+
+    openBookingModal(initialBookingTutor);
+    onInitialBookingHandled?.();
+  }, [initialBookingTutor, onInitialBookingHandled]);
+
+  const today = new Date().toLocaleDateString('en-CA');
+  const minimumNoticeHours = bookingTutor?.minimumNoticeHours || 6;
+  const acceptsShortNoticeRequests = bookingTutor?.acceptsShortNoticeRequests ?? true;
+  const earliestBookingDate = new Date(Date.now() + minimumNoticeHours * 60 * 60 * 1000).toLocaleDateString('en-CA');
+  const selectedDate = bookingData.date || today;
+  const selectedTutorTimetable = bookingTutor ? getTutorDailyTimetable(sessions, bookingTutor.id, selectedDate) : [];
+  const availableUnits = getUnitsForSubject(bookingData.subject);
+  const resolvedUnit = bookingData.customUnit.trim() || bookingData.unit;
+  const selectedSlotInPast =
+    bookingData.date && bookingData.time
+      ? isPastSessionTime(bookingData.date, bookingData.time)
+      : false;
+  const selectedSlotTooSoon =
+    bookingData.date && bookingData.time
+      ? !selectedSlotInPast && !meetsMinimumNoticeHours(bookingData.date, bookingData.time, minimumNoticeHours)
+      : false;
+  const selectedSlotShortNotice =
+    bookingData.date && bookingData.time
+      ? !selectedSlotInPast && isShortNoticeSession(bookingData.date, bookingData.time)
+      : false;
+  const localSlotConflict =
+    bookingTutor && bookingData.date && bookingData.time &&
+    !isTutorAvailableForSlot(sessions, bookingTutor.id, {
+      date: bookingData.date,
+      time: bookingData.time,
+      duration: bookingData.duration,
+    });
+  const selectedSlotConflict = bookingTutor && bookingData.date && bookingData.time ? (slotConflict || localSlotConflict) : null;
+  const bookingRequestBlocked =
+    checkingSlotConflict ||
+    selectedSlotInPast ||
+    selectedSlotTooSoon ||
+    (selectedSlotShortNotice && !acceptsShortNoticeRequests) ||
+    Boolean(selectedSlotConflict);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!bookingTutor || !bookingData.date || !bookingData.time) {
+      setSlotConflict(null);
+      setCheckingSlotConflict(false);
+      setSlotConflictError('');
+      return () => {
+        active = false;
+      };
+    }
+
+    if (selectedSlotInPast || selectedSlotTooSoon || (selectedSlotShortNotice && !acceptsShortNoticeRequests)) {
+      setSlotConflict(null);
+      setCheckingSlotConflict(false);
+      setSlotConflictError('');
+      return () => {
+        active = false;
+      };
+    }
+
+    setCheckingSlotConflict(true);
+    setSlotConflictError('');
+
+    api.checkTutorSlotConflict({
+      tutorId: bookingTutor.id,
+      date: bookingData.date,
+      time: bookingData.time,
+      duration: bookingData.duration,
+    })
+      .then(result => {
+        if (!active) return;
+        setSlotConflict(result.conflict || null);
+        setSlotConflictError('');
+      })
+      .catch(error => {
+        if (!active) return;
+        console.error('Failed to validate slot conflict:', error);
+        setSlotConflict(null);
+        setSlotConflictError('');
+      })
+      .finally(() => {
+        if (!active) return;
+        setCheckingSlotConflict(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    acceptsShortNoticeRequests,
+    bookingData.date,
+    bookingData.duration,
+    bookingData.time,
+    bookingTutor,
+    selectedSlotInPast,
+    selectedSlotShortNotice,
+    selectedSlotTooSoon,
+  ]);
+
+  const tutorReviewCounts = sessions.reduce<Record<string, number>>((counts, session) => {
+    if ((session.rating || 0) > 0) {
+      counts[session.tutorId] = (counts[session.tutorId] || 0) + 1;
+    }
+
+    return counts;
+  }, {});
+
   const tutors = allTutors.filter(u =>
     (selectedSubject === 'All' || u.subjects?.includes(selectedSubject)) &&
     (u.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       u.subjects?.some(s => s.toLowerCase().includes(searchQuery.toLowerCase())))
-  );
+  ).sort((left, right) => {
+    const reviewCountDifference = (tutorReviewCounts[right.id] || 0) - (tutorReviewCounts[left.id] || 0);
+
+    if (reviewCountDifference !== 0) {
+      return reviewCountDifference;
+    }
+
+    const ratingDifference = (right.rating || 0) - (left.rating || 0);
+
+    if (ratingDifference !== 0) {
+      return ratingDifference;
+    }
+
+    return left.fullName.localeCompare(right.fullName);
+  });
 
   const openBookingModal = (tutor: User) => {
     setBookingTutor(tutor);
+    setSlotConflict(null);
+    setCheckingSlotConflict(false);
+    setSlotConflictError('');
     setBookingData({
       subject: tutor.subjects?.[0] || '',
+      unit: '',
+      customUnit: '',
       date: '',
       time: '',
       duration: 60,
@@ -77,7 +197,10 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
 
   const closeBookingModal = () => {
     setBookingTutor(null);
-    setBookingData({ subject: '', date: '', time: '', duration: 60, notes: '' });
+    setSlotConflict(null);
+    setCheckingSlotConflict(false);
+    setSlotConflictError('');
+    setBookingData({ subject: '', unit: '', customUnit: '', date: '', time: '', duration: 60, notes: '' });
   };
 
   const handleBookSession = async () => {
@@ -86,11 +209,32 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
       return;
     }
 
+    if (!resolvedUnit) {
+      alert('Please choose a unit or type your own unit for this session.');
+      return;
+    }
+
+    if (isPastSessionTime(bookingData.date, bookingData.time)) {
+      alert('You cannot book a session in the past. Please choose a future date and time.');
+      return;
+    }
+
+    if (!meetsMinimumNoticeHours(bookingData.date, bookingData.time, minimumNoticeHours)) {
+      alert(`This tutor requires at least ${minimumNoticeHours} hours notice.`);
+      return;
+    }
+
+    if (isShortNoticeSession(bookingData.date, bookingData.time) && !acceptsShortNoticeRequests) {
+      alert('This tutor does not accept short-notice requests.');
+      return;
+    }
+
     const newSession = {
       id: Math.random().toString(36).substr(2, 9),
       studentId: user.id,
       tutorId: bookingTutor.id,
       subject: bookingData.subject,
+      unit: resolvedUnit,
       date: bookingData.date,
       time: bookingData.time,
       duration: bookingData.duration,
@@ -100,22 +244,31 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
     };
 
     try {
-      await api.createSession(newSession);
+      try {
+        const conflictResult = await api.checkTutorSlotConflict({
+          tutorId: bookingTutor.id,
+          date: bookingData.date,
+          time: bookingData.time,
+          duration: bookingData.duration,
+        });
+
+        if (conflictResult.hasConflict) {
+          setSlotConflict(conflictResult.conflict || null);
+          alert('This lecturer already has a booking at that time. Please choose another slot.');
+          return;
+        }
+      } catch (error) {
+        console.error('Failed to run pre-submit conflict check:', error);
+      }
+
+      const createdSession = await api.createSession(newSession);
+      setSessions(current => [createdSession, ...current]);
       alert('Session requested successfully!');
       closeBookingModal();
     } catch (error) {
       console.error('Failed to book session:', error);
-      alert('Failed to request session. Please try again.');
+      alert(error instanceof Error ? error.message : 'Failed to request session. Please try again.');
     }
-  };
-
-  const generateAIPrompt = async () => {
-    if (!bookingTutor) return;
-    setAiLoading(true);
-    const prompt = `Draft a polite and clear message from a student to their tutor ${bookingTutor.fullName} requesting help with ${bookingData.subject || bookingTutor.subjects?.[0] || 'the selected subject'}. The student is struggling with the basics.`;
-    const result = await getGeminiAssistance(prompt);
-    setBookingData({ ...bookingData, notes: result });
-    setAiLoading(false);
   };
 
   return (
@@ -152,7 +305,13 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
           </div>
         )}
 
-        {tutors.map(tutor => (
+        {tutors.map(tutor => {
+          const todaysBookings = getTutorDailyTimetable(sessions, tutor.id, today).length;
+          const bookingLabel = todaysBookings > 0
+            ? `${todaysBookings} booking(s) today`
+            : 'No bookings today';
+
+          return (
           <div key={tutor.id} className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm transition-all hover:border-emerald-200">
             <div className="flex gap-4">
               <div className="w-16 h-16 rounded-2xl border border-gray-100 bg-gray-50 overflow-hidden flex items-center justify-center">
@@ -175,6 +334,15 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
                     <span>★ {tutor.rating}</span>
                   </div>
                 </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded-full ${
+                    todaysBookings > 0
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-gray-100 text-gray-600'
+                  }`}>
+                    {bookingLabel}
+                  </span>
+                </div>
                 <p className="text-xs text-gray-500 line-clamp-2 mt-1">{tutor.bio}</p>
                 <div className="flex flex-wrap gap-1 mt-2">
                   {tutor.subjects?.map(s => (
@@ -192,7 +360,8 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
               Book Session
             </button>
           </div>
-        ))}
+        );
+        })}
 
         {!loadingTutors && tutors.length === 0 && (
           <div className="bg-white p-8 rounded-3xl border border-dashed border-gray-300 text-center">
@@ -206,13 +375,13 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
 
       {bookingTutor && (
         <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in slide-in-from-bottom duration-300">
-            <div className="flex justify-between items-center mb-6">
+          <div className="bg-white w-full max-w-sm max-h-[calc(100vh-2rem)] rounded-3xl shadow-2xl animate-in slide-in-from-bottom duration-300 overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center p-6 pb-4 border-b border-gray-100 sticky top-0 bg-white z-10">
               <h3 className="text-xl font-bold">Request Session</h3>
               <button onClick={closeBookingModal} className="text-gray-400 text-xl">&times;</button>
             </div>
 
-            <div className="space-y-4">
+            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
               <div className="flex items-center gap-3 p-3 bg-emerald-50 rounded-2xl">
                 <div className="w-10 h-10 rounded-full bg-white border border-emerald-100 overflow-hidden flex items-center justify-center">
                   {bookingTutor.avatar ? (
@@ -232,7 +401,7 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
                 <select
                   className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-white"
                   value={bookingData.subject}
-                  onChange={e => setBookingData({ ...bookingData, subject: e.target.value })}
+                  onChange={e => setBookingData({ ...bookingData, subject: e.target.value, unit: '', customUnit: '' })}
                 >
                   <option value="">Select a subject</option>
                   {(bookingTutor.subjects && bookingTutor.subjects.length > 0 ? bookingTutor.subjects : SUBJECTS).map(subject => (
@@ -244,13 +413,49 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
               </div>
 
               <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Unit</label>
+                <select
+                  className="w-full p-2 border border-gray-200 rounded-lg text-sm bg-white"
+                  value={bookingData.unit}
+                  onChange={e => setBookingData({ ...bookingData, unit: e.target.value })}
+                >
+                  <option value="">
+                    {availableUnits.length > 0 ? 'Select a unit' : 'Select a unit'}
+                  </option>
+                  {availableUnits.map(unit => (
+                    <option key={unit} value={unit}>
+                      {unit}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  className="w-full mt-2 p-2 border border-gray-200 rounded-lg text-sm"
+                  placeholder={
+                    bookingData.subject
+                      ? 'Or type your own unit if it is not listed'
+                      : 'Type your unit here even if no subject is selected yet'
+                  }
+                  value={bookingData.customUnit}
+                  onChange={e => setBookingData({ ...bookingData, customUnit: e.target.value })}
+                />
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Date</label>
                 <input
                   type="date"
+                  min={earliestBookingDate}
                   className="w-full p-2 border border-gray-200 rounded-lg text-sm"
                   value={bookingData.date}
                   onChange={e => setBookingData({ ...bookingData, date: e.target.value })}
                 />
+                <p className="mt-2 text-[11px] text-gray-500">
+                  Minimum notice for this tutor: {minimumNoticeHours} hours.
+                </p>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Advance booking recommended. Short-notice requests may require tutor approval.
+                </p>
               </div>
 
               <div>
@@ -261,6 +466,29 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
                   value={bookingData.time}
                   onChange={e => setBookingData({ ...bookingData, time: e.target.value })}
                 />
+                {bookingData.date && bookingData.time && (
+                  <p className={`mt-2 text-xs font-semibold ${
+                    selectedSlotInPast || selectedSlotTooSoon || selectedSlotConflict || (selectedSlotShortNotice && !acceptsShortNoticeRequests)
+                      ? 'text-red-600'
+                      : 'text-emerald-600'
+                  }`}>
+                    {selectedSlotInPast
+                      ? 'Please choose a future time for this booking.'
+                      : selectedSlotTooSoon
+                      ? `This tutor requires at least ${minimumNoticeHours} hours notice.`
+                      : checkingSlotConflict
+                      ? 'Checking for booking conflicts at this time slot...'
+                      : slotConflictError
+                      ? slotConflictError
+                      : selectedSlotConflict
+                      ? `${bookingTutor.fullName} already has a session at this time. Please choose a different time.`
+                      : selectedSlotShortNotice && !acceptsShortNoticeRequests
+                      ? 'This tutor does not accept short-notice requests.'
+                      : selectedSlotShortNotice
+                      ? `Short-notice session: tutor approval is required for requests inside ${SHORT_NOTICE_WINDOW_HOURS} hours.`
+                      : 'No conflicting bookings found for this time slot.'}
+                  </p>
+                )}
               </div>
 
               <div>
@@ -278,17 +506,39 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
                 </select>
               </div>
 
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <label className="block text-xs font-bold text-gray-500 uppercase">Message to Tutor</label>
-                  <button
-                    onClick={generateAIPrompt}
-                    disabled={aiLoading}
-                    className="text-[10px] text-emerald-600 font-bold flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full"
-                  >
-                    {aiLoading ? 'Thinking...' : 'AI Assist'}
-                  </button>
+              <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div>
+                    <p className="text-[10px] font-bold text-gray-500 uppercase">Daily Timetable</p>
+                    <p className="text-xs text-gray-600 mt-1">
+                      {selectedDate === today ? 'Today' : selectedDate} for {bookingTutor.fullName}
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase">
+                    {selectedTutorTimetable.length} session(s)
+                  </span>
                 </div>
+
+                {selectedTutorTimetable.length > 0 ? (
+                  <div className="space-y-2">
+                    {selectedTutorTimetable.map(session => (
+                      <div key={session.id} className="rounded-xl bg-white border border-gray-100 px-3 py-2">
+                        <p className="text-xs font-bold text-gray-900">{session.subject}</p>
+                        {session.unit && <p className="text-[11px] text-emerald-700 font-medium mt-1">{session.unit}</p>}
+                        <p className="text-[11px] text-gray-500">
+                          {session.time} for {session.duration} minutes
+                        </p>
+                        <p className="text-[10px] mt-1 font-bold uppercase text-emerald-600">{session.status}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-600 font-semibold">No bookings recorded for this day.</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Message to Tutor</label>
                 <textarea
                   className="w-full p-2 border border-gray-200 rounded-lg text-sm h-24 resize-none"
                   placeholder="Tell the tutor what you need help with..."
@@ -297,9 +547,13 @@ export const SearchTutors: React.FC<SearchProps> = ({ user, onViewTutorProfile }
                 />
               </div>
 
+            </div>
+
+            <div className="p-6 pt-4 border-t border-gray-100 bg-white">
               <button
                 onClick={handleBookSession}
-                className="w-full bg-emerald-600 text-white font-bold py-3 rounded-2xl shadow-lg mt-4"
+                disabled={bookingRequestBlocked}
+                className="w-full bg-emerald-600 text-white font-bold py-3 rounded-2xl shadow-lg disabled:opacity-50"
               >
                 Send Request
               </button>

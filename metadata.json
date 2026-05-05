@@ -1,6 +1,6 @@
 
 {
   "name": "PeerTutoringPro",
-  "description": "A comprehensive mobile-first platform connecting students with qualified peer tutors within academic institutions, featuring session scheduling, real-time messaging, and admin management.",
+  "description": "A comprehensive mobile-first platform connecting students with qualified peer tutors within academic institutions, featuring session scheduling and real-time messaging.",
   "requestFramePermissions": ["camera", "microphone"]
 }

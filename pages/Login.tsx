@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { User } from '../types';
+import { api } from '../services/api';
 
 interface LoginProps {
   onLogin: (user: User) => void;
@@ -15,43 +16,16 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
     e.preventDefault();
     setError('');
     try {
-      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:4000";
-      const response = await fetch(`${API_URL}/users`);
-      if (!response.ok) throw new Error("Failed to fetch users");
-
-      const users = await response.json();
-      const foundUser = users.find((u: any) => u.email === email && u.password === password);
-
-      if (foundUser) {
-        // normalize DB schema to front-end user shape
-        const normalizedUser: any = {
-          id: foundUser.id.toString(),
-          fullName: foundUser.fullName || foundUser.name || '',
-          email: foundUser.email,
-          password: foundUser.password,
-          role: foundUser.role,
-          isApproved: foundUser.isApproved === true || foundUser.approved === 1,
-          isActive: true,
-          subjects: foundUser.subjects || [],
-          bio: foundUser.bio || '',
-          rating: foundUser.rating || 0,
-          totalSessions: foundUser.totalSessions || 0,
-          avatar: foundUser.avatar || ''
-        };
-
-        console.log("Login successful", normalizedUser);
-        onLogin(normalizedUser);
-      } else {
-        setError('Invalid email or password');
-      }
+      const authenticatedUser = await api.login(email, password);
+      onLogin(authenticatedUser);
     } catch (error) {
       console.error("Error logging in:", error);
-      setError('An error occurred during login. Please try again.');
+      setError(error instanceof Error ? error.message : 'An error occurred during login. Please try again.');
     }
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col justify-center px-6 max-w-md mx-auto shadow-xl">
+    <div className="w-full min-h-dvh bg-white flex flex-col justify-center px-6 sm:max-w-md sm:mx-auto sm:min-h-screen sm:shadow-xl">
       <div className="mb-10 text-center">
         <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-3xl flex items-center justify-center mx-auto mb-4">
           <span className="text-4xl">🎓</span>
