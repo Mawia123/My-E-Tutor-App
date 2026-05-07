@@ -2,9 +2,16 @@ services:
   - type: web
     name: peertutoringpro-backend
     runtime: node
+    plan: starter
     rootDir: backend
     buildCommand: npm install
     startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    disk:
+      name: peertutoringpro-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1
     envVars:
       - key: FRONTEND_URL
         sync: false

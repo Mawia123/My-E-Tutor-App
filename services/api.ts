@@ -8,16 +8,23 @@ const resolveApiUrl = () => {
   }
 
   if (typeof window !== 'undefined') {
-    const { protocol, hostname } = window.location;
-    return `${protocol}//${hostname}:4000`;
+    const { hostname } = window.location;
+
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return `http://${hostname}:4000`;
+    }
   }
 
-  return 'http://localhost:4000';
+  return '';
 };
 
 export const API_URL = resolveApiUrl();
 
 const request = async <T>(path: string, options?: RequestInit): Promise<T> => {
+  if (!API_URL) {
+    throw new Error('API is not configured. Set VITE_API_URL for hosted web or APK builds.');
+  }
+
   const response = await fetch(`${API_URL}${path}`, {
     credentials: 'include',
     headers: {
