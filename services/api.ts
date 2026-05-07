@@ -104,6 +104,13 @@ export const api = {
     });
   },
 
+  async resetPassword(email: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    return request<{ success: boolean; message: string }>('/auth/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email, newPassword }),
+    });
+  },
+
   async getUsers(): Promise<User[]> {
     const users = await request<any[]>('/users');
     return users.map(normalizeUser);

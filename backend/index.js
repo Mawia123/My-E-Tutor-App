@@ -486,6 +486,48 @@ app.post("/auth/logout", async (req, res) => {
   }
 });
 
+app.post("/auth/forgot-password", async (req, res) => {
+  const { email, newPassword } = req.body;
+
+  if (!email || !newPassword) {
+    return res.status(400).json({ error: "Email and new password are required" });
+  }
+
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: "Please enter a valid email address" });
+  }
+
+  if (String(newPassword).length < 4) {
+    return res.status(400).json({ error: "Password must be at least 4 characters" });
+  }
+
+  try {
+    const updatedUser = await get(`
+      UPDATE users
+      SET password_hash = $1,
+          password = ''
+      WHERE LOWER(TRIM(email)) = LOWER(TRIM($2))
+      RETURNING id
+    `, [hashPassword(newPassword), email]);
+
+    if (!updatedUser) {
+      return res.status(404).json({ error: "No account was found for that email address" });
+    }
+
+    await query(`
+      DELETE FROM sessions_auth
+      WHERE user_id = $1
+    `, [updatedUser.id]);
+
+    return res.json({
+      success: true,
+      message: "Password reset successful. You can now sign in with your new password.",
+    });
+  } catch {
+    return res.status(500).json({ error: "Failed to reset password" });
+  }
+});
+
 app.post("/users", async (req, res) => {
   const { name, email, password, role } = req.body;
 
