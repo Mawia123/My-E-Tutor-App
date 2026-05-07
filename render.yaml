@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: peertutoringpro-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: FRONTEND_URL
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: COOKIE_SAME_SITE
+        value: None
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DB_PATH
+        value: /opt/render/project/src/data/database.db

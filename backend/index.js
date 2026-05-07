@@ -3,6 +3,7 @@ const cors = require("cors");
 const sqlite3 = require("sqlite3").verbose();
 const path = require("path");
 const crypto = require("crypto");
+const fs = require("fs");
 
 const app = express();
 const allowedOriginPatterns = [
@@ -10,8 +11,20 @@ const allowedOriginPatterns = [
   /^http:\/\/127\.0\.0\.1(?::\d+)?$/,
   /^http:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?$/,
   /^http:\/\/172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}(?::\d+)?$/,
-  /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}(?::\d+)?$/
+  /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}(?::\d+)?$/,
+  /^https:\/\/.+\.vercel\.app$/,
+  /^https:\/\/.+\.netlify\.app$/,
+  /^https:\/\/.+\.onrender\.com$/
 ];
+const configuredAllowedOrigins = (process.env.ALLOWED_ORIGINS || process.env.FRONTEND_URL || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const cookieSameSite = process.env.COOKIE_SAME_SITE || (configuredAllowedOrigins.length > 0 ? "None" : "Lax");
+const useSecureCookies = process.env.COOKIE_SECURE === "true" || cookieSameSite.toLowerCase() === "none";
+const dbPath = process.env.DB_PATH || path.join(__dirname, "database.db");
+
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 app.use(cors({
   origin(origin, callback) {
@@ -19,7 +32,8 @@ app.use(cors({
       return callback(null, true);
     }
 
-    const isAllowed = allowedOriginPatterns.some((pattern) => pattern.test(origin));
+    const isConfiguredOrigin = configuredAllowedOrigins.includes(origin);
+    const isAllowed = isConfiguredOrigin || allowedOriginPatterns.some((pattern) => pattern.test(origin));
 
     if (isAllowed) {
       return callback(null, true);
@@ -31,7 +45,6 @@ app.use(cors({
 }));
 app.use(express.json({ limit: "10mb" }));
 
-const dbPath = path.join(__dirname, "database.db");
 const db = new sqlite3.Database(dbPath);
 const SESSION_COOKIE_NAME = "peer_tutoring_session";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -114,6 +127,8 @@ const verifyPassword = (password, storedHash) => {
   return crypto.timingSafeEqual(storedBuffer, derivedKey);
 };
 
+const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || "").trim());
+
 const hashSessionToken = (token) => crypto.createHash("sha256").update(token).digest("hex");
 
 const parseCookies = (cookieHeader = "") =>
@@ -134,11 +149,37 @@ const parseCookies = (cookieHeader = "") =>
       return cookies;
     }, {});
 
-const serializeSessionCookie = (token, maxAgeMs = SESSION_TTL_MS) =>
-  `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.floor(maxAgeMs / 1000)}`;
+const serializeSessionCookie = (token, maxAgeMs = SESSION_TTL_MS) => {
+  const parts = [
+    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    "HttpOnly",
+    "Path=/",
+    `SameSite=${cookieSameSite}`,
+    `Max-Age=${Math.floor(maxAgeMs / 1000)}`
+  ];
 
-const clearSessionCookie = () =>
-  `${SESSION_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`;
+  if (useSecureCookies) {
+    parts.push("Secure");
+  }
+
+  return parts.join("; ");
+};
+
+const clearSessionCookie = () => {
+  const parts = [
+    `${SESSION_COOKIE_NAME}=`,
+    "HttpOnly",
+    "Path=/",
+    `SameSite=${cookieSameSite}`,
+    "Max-Age=0"
+  ];
+
+  if (useSecureCookies) {
+    parts.push("Secure");
+  }
+
+  return parts.join("; ");
+};
 
 const getSessionTokenFromRequest = (req) => {
   const cookies = parseCookies(req.headers.cookie || "");
@@ -336,6 +377,15 @@ const initializeDatabase = async () => {
       expiresAt INTEGER NOT NULL
     )
   `);
+
+  try {
+    await run(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique_normalized
+      ON users(LOWER(TRIM(email)))
+    `);
+  } catch (err) {
+    console.warn("Could not create normalized unique email index. Clean duplicate emails first.", err.message);
+  }
 
   await run("DELETE FROM sessions_auth WHERE expiresAt <= ?", [Date.now()]);
 
@@ -548,6 +598,10 @@ app.post("/users", async (req, res) => {
 
   if (!name || !email || !password || !role) {
     return res.status(400).json({ error: "All fields are required" });
+  }
+
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: "Please enter a valid email address" });
   }
 
   if (String(password).length < 4) {
@@ -906,7 +960,7 @@ app.patch("/messages/:id", async (req, res) => {
 
 initializeDatabase()
   .then(() => {
-    const PORT = 4000;
+    const PORT = Number(process.env.PORT || 4000);
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });
