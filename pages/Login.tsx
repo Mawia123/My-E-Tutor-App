@@ -120,20 +120,22 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
           </div>
         </div>
 
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => {
-              setShowResetForm((current) => !current);
-              setResetMessage('');
-              setResetError('');
-              setResetEmail(email);
-            }}
-            className="text-sm font-semibold text-emerald-600 hover:underline"
-          >
-            Forgot password?
-          </button>
-        </div>
+        {!showResetForm && (
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setShowResetForm(true);
+                setResetMessage('');
+                setResetError('');
+                setResetEmail(email);
+              }}
+              className="text-sm font-semibold text-emerald-600 hover:underline"
+            >
+              Forgot password?
+            </button>
+          </div>
+        )}
 
         {showResetForm && (
           <div className="space-y-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
