@@ -692,13 +692,15 @@ export const TutorDashboard: React.FC<TutorDashboardProps> = ({ user, onOpenChat
                   <option value="month">This Month</option>
                   <option value="all">All Time</option>
                 </select>
-                <button
-                  type="button"
-                  onClick={handleDownloadHistory}
-                  className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white"
-                >
-                  Download History
-                </button>
+                {filteredHistorySessions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleDownloadHistory}
+                    className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white"
+                  >
+                    Download History
+                  </button>
+                )}
               </div>
             </div>
 

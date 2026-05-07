@@ -33,18 +33,6 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    api.getCurrentUser()
-      .then(currentUser => {
-        setUser(currentUser);
-        setCurrentPage('app');
-      })
-      .catch(() => {
-        setUser(null);
-        setCurrentPage('login');
-      });
-  }, []);
-
-  useEffect(() => {
     if (currentPage !== 'app' || currentTab !== 'profile' || !user?.id) return;
 
     api.getUsers()

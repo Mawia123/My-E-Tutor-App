@@ -7,7 +7,9 @@ interface RegisterProps {
 }
 
 export const Register: React.FC<RegisterProps> = ({ onBack }) => {
+  const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const [step, setStep] = useState(1);
+  const [emailError, setEmailError] = useState('');
   const [formData, setFormData] = useState({
     fullName: '',
     email: '',
@@ -17,6 +19,11 @@ export const Register: React.FC<RegisterProps> = ({ onBack }) => {
   });
 
   const handleRegister = async () => {
+    if (!isValidEmail(formData.email)) {
+      setEmailError('Please enter a valid email address with @ and a domain.');
+      return;
+    }
+
     try {
       const result = await api.createUser({
         name: formData.fullName,
@@ -32,6 +39,21 @@ export const Register: React.FC<RegisterProps> = ({ onBack }) => {
       console.error("Registration error:", error);
       alert("Registration failed: " + (error instanceof Error ? error.message : String(error)));
     }
+  };
+
+  const handleNextStep = () => {
+    if (!formData.email.trim()) {
+      setEmailError('Email is required.');
+      return;
+    }
+
+    if (!isValidEmail(formData.email)) {
+      setEmailError('Please enter a valid email address with @ and a domain.');
+      return;
+    }
+
+    setEmailError('');
+    setStep(2);
   };
 
   return (
@@ -64,8 +86,23 @@ export const Register: React.FC<RegisterProps> = ({ onBack }) => {
               className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-500 outline-none"
               placeholder="your.name@university.edu"
               value={formData.email}
-              onChange={e => setFormData({...formData, email: e.target.value})}
+              onChange={e => {
+                const nextEmail = e.target.value;
+                setFormData({...formData, email: nextEmail});
+
+                if (!nextEmail.trim()) {
+                  setEmailError('');
+                  return;
+                }
+
+                setEmailError(
+                  isValidEmail(nextEmail) ? '' : 'Please enter a valid email address with @ and a domain.'
+                );
+              }}
             />
+            {emailError && (
+              <p className="mt-2 text-sm text-red-600">{emailError}</p>
+            )}
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
@@ -78,7 +115,7 @@ export const Register: React.FC<RegisterProps> = ({ onBack }) => {
             />
           </div>
           <button
-            onClick={() => setStep(2)}
+            onClick={handleNextStep}
             disabled={!formData.fullName || !formData.email || formData.password.length < 4}
             className="w-full bg-emerald-600 text-white font-bold py-3 rounded-xl disabled:opacity-50"
           >
