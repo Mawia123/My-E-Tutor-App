@@ -18,15 +18,19 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
   const [resetMessage, setResetMessage] = useState('');
   const [resetError, setResetError] = useState('');
   const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
     try {
       const authenticatedUser = await api.login(email, password);
       onLogin(authenticatedUser);
     } catch (error) {
-      console.error("Error logging in:", error);
+      console.error('Error logging in:', error);
       setError(error instanceof Error ? error.message : 'An error occurred during login. Please try again.');
     }
   };
@@ -82,7 +86,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
             {error}
           </div>
         )}
-        
+
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
           <input
@@ -97,14 +101,23 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
-            placeholder="••••••••"
-            required
-          />
+          <div className="relative">
+            <input
+              type={showLoginPassword ? 'text' : 'password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-3 pr-16 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
+              placeholder="••••••••"
+              required
+            />
+            <button
+              type="button"
+              onClick={() => setShowLoginPassword((current) => !current)}
+              className="absolute inset-y-0 right-4 text-sm font-semibold text-gray-500 hover:text-emerald-600"
+            >
+              {showLoginPassword ? 'Hide' : 'Show'}
+            </button>
+          </div>
         </div>
 
         <div className="flex justify-end">
@@ -155,26 +168,44 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">New Password</label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
-                  placeholder="Choose a new password"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full px-4 py-3 pr-16 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
+                    placeholder="Choose a new password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((current) => !current)}
+                    className="absolute inset-y-0 right-4 text-sm font-semibold text-gray-500 hover:text-emerald-600"
+                  >
+                    {showNewPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Confirm New Password</label>
-                <input
-                  type="password"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
-                  placeholder="Re-enter the new password"
-                  required
-                />
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full px-4 py-3 pr-16 rounded-xl border border-gray-300 focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
+                    placeholder="Re-enter the new password"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((current) => !current)}
+                    className="absolute inset-y-0 right-4 text-sm font-semibold text-gray-500 hover:text-emerald-600"
+                  >
+                    {showConfirmPassword ? 'Hide' : 'Show'}
+                  </button>
+                </div>
               </div>
 
               <button
@@ -205,7 +236,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
           </button>
         </p>
       </div>
-      
+
       <div className="mt-12 text-center text-xs text-gray-400">
         <p>Academic Use Only • &copy; 2026 PeerTutoringPro</p>
       </div>
