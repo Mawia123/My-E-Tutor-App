@@ -218,16 +218,30 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
               >
                 {isResettingPassword ? 'Resetting Password...' : 'Reset Password'}
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowResetForm(false);
+                  setResetError('');
+                  setResetMessage('');
+                }}
+                className="w-full text-sm font-semibold text-emerald-700 hover:underline"
+              >
+                Back to Sign In
+              </button>
             </div>
           </div>
         )}
 
-        <button
-          type="submit"
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-colors"
-        >
-          Sign In
-        </button>
+        {!showResetForm && (
+          <button
+            type="submit"
+            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-colors"
+          >
+            Sign In
+          </button>
+        )}
       </form>
 
       <div className="mt-8 text-center">
