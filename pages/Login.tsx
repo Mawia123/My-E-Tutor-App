@@ -126,9 +126,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin, onGoToRegister }) => {
           <div className="space-y-4 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4">
             <div>
               <h2 className="text-sm font-bold text-gray-900">Reset your password</h2>
-              <p className="mt-1 text-xs text-gray-600">
-                Demo reset for this project. Enter your account email and choose a new password.
-              </p>
             </div>
 
             {resetError && (
