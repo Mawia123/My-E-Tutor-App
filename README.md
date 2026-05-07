@@ -1,47 +1,80 @@
 # PeerTutoringPro
 
-PeerTutoringPro is a React + Vite frontend with an Express + SQLite backend for tutor discovery, session booking, messaging, and profile management.
+PeerTutoringPro is a React + Vite frontend with a Node.js + Express backend for tutor discovery, session booking, messaging, and profile management.
+
+This project is now prepared for:
+- Frontend on Vercel
+- Database on Supabase PostgreSQL
+- Backend on Render free web service
+
+## Project Structure
+
+- Root folder: Vite frontend
+- `backend`: Express API
+- `backend/scripts/migrate-sqlite-to-postgres.js`: one-time data migration from SQLite to PostgreSQL
+- `android`: optional Capacitor Android wrapper
 
 ## Local Development
 
 Prerequisites:
 - Node.js 18+
+- A PostgreSQL database URL
 
 Frontend:
-1. Install dependencies:
-   `npm install`
-2. Create `.env.local` with:
-   `VITE_GEMINI_API_KEY=your_key_here`
-3. Start the frontend:
-   `npm run dev`
+1. Run `npm install`
+2. Create `.env.local`
+3. Add:
+   `VITE_API_URL=http://localhost:4000`
+   `VITE_GEMINI_API_KEY=your_gemini_key`
+4. Run `npm run dev`
 
 Backend:
 1. Open a second terminal
-2. Install backend dependencies:
-   `cd backend`
-   `npm install`
-3. Start the backend:
-   `npm start`
+2. Run `cd backend`
+3. Run `npm install`
+4. Copy `backend/.env.example` to `.env` or set the variables in your terminal
+5. Set `DATABASE_URL`
+6. Run `npm start`
 
 Local URLs:
 - Frontend: `http://localhost:3000`
 - Backend: `http://localhost:4000`
 
-## Deploy Overview
+## Backend Environment Variables
 
-Recommended setup:
-- Frontend: Vercel or Netlify
-- Backend: Render Web Service
-- Database: SQLite on a Render persistent disk
+Use [backend/.env.example](/c:/Users/Mawia/Documents/App/backend/.env.example).
 
-Why this setup:
-- The frontend is a static Vite app and deploys cleanly on Vercel/Netlify.
-- The backend uses Express and SQLite, which fits Render well.
-- Your app uses cookie-based login, so the hosted backend must allow your hosted frontend origin.
+Required:
+- `DATABASE_URL`
+- `FRONTEND_URL`
+- `ALLOWED_ORIGINS`
+
+Recommended:
+- `COOKIE_SAME_SITE=None`
+- `COOKIE_SECURE=true`
+- `PORT=4000`
+
+Optional for one-time migration:
+- `SQLITE_DB_PATH=./database.db`
+
+## SQLite To PostgreSQL Migration
+
+If you already have data in `backend/database.db`, run this once after you create Supabase:
+
+```powershell
+cd backend
+npm run migrate:sqlite
+```
+
+What it migrates:
+- users
+- sessions
+- messages
+- auth sessions
 
 ## Frontend Deployment
 
-Deploy the project root as the frontend.
+Deploy the project root to Vercel.
 
 Build settings:
 - Build command: `npm run build`
@@ -51,113 +84,69 @@ Frontend environment variables:
 - `VITE_API_URL=https://your-backend-name.onrender.com`
 - `VITE_GEMINI_API_KEY=your_gemini_key`
 
-Important:
-- `VITE_GEMINI_API_KEY` is embedded into the frontend bundle and can be viewed by users. That is acceptable for a classroom demo, but for a stricter production setup you should move Gemini requests to the backend.
-- `VITE_API_URL` must be set for any hosted or APK build. The frontend now only auto-falls back to `localhost` during local development.
-
-## APK Conversion
-
-This project can be packaged as an Android app with Capacitor after the hosted backend is ready.
-
-Recommended order:
-1. Deploy the backend to Render.
-2. Deploy the frontend to Vercel or Netlify.
-3. Set `VITE_API_URL` to the public backend URL.
-4. Build the frontend with `npm run build`.
-5. Sync the Android wrapper with `npm run cap:sync`.
-6. Open the Android project with `npm run cap:android`.
-7. Generate an APK from Android Studio.
-
-Notes:
-- The APK will still call your hosted backend, so your professor can use the same data from anywhere.
-- Cookie-based login should be tested on a real Android device after hosting is live.
-- You still need to run `npm install` once to download the Capacitor packages added in `package.json`.
-
-### Vercel
-
-Deploy the root folder and add the environment variables above in the Vercel project settings.
-
 This repo already includes [vercel.json](/c:/Users/Mawia/Documents/App/vercel.json) for:
-- SPA rewrites so direct links keep working
+- SPA rewrites
 - Vite framework detection
 - cache headers for built assets
 
-### Netlify
+## Backend Deployment
 
-Deploy the root folder and add the environment variables above in the Netlify site settings.
+Deploy the `backend` service to Render free web service.
 
-## Backend Deployment on Render
+This repo already includes [render.yaml](/c:/Users/Mawia/Documents/App/render.yaml) with:
+- free web service settings
+- health check
+- auto deploy
+- environment variable placeholders
 
-Create a Render Web Service from the `backend` folder or from this repo with `backend` set as the root directory.
-
-Render settings:
-- Runtime: `Node`
-- Root Directory: `backend`
-- Build Command: `npm install`
-- Start Command: `npm start`
-
-Backend environment variables:
-- `FRONTEND_URL=https://your-frontend-domain.vercel.app`
-- `ALLOWED_ORIGINS=https://your-frontend-domain.vercel.app`
-- `COOKIE_SAME_SITE=None`
-- `COOKIE_SECURE=true`
-- `DB_PATH=/opt/render/project/src/data/database.db`
-
-Persistent disk:
-- Attach a persistent disk in Render
-- Mount path: `/opt/render/project/src/data`
-
-This repo already includes [render.yaml](/c:/Users/Mawia/Documents/App/render.yaml) for:
-- the backend service definition
-- a persistent SQLite disk mount
-- health checks
-- the required cookie/database environment defaults
-
-You can also reference [backend/.env.example](/c:/Users/Mawia/Documents/App/backend/.env.example) when filling in Render environment variables.
-
-Notes:
-- `FRONTEND_URL` and `ALLOWED_ORIGINS` should match the exact public frontend origin.
-- If you later add a custom domain, update both values.
-- The backend already reads `PORT` from Render automatically.
-
-## First Deployment Checklist
-
-1. Push this project to GitHub.
-2. Deploy the backend to Render using [render.yaml](/c:/Users/Mawia/Documents/App/render.yaml).
-3. In Render, set `FRONTEND_URL` and `ALLOWED_ORIGINS` to your final frontend URL.
-4. Wait for Render to assign a public backend URL such as `https://your-backend-name.onrender.com`.
-5. Deploy the frontend to Vercel using [vercel.json](/c:/Users/Mawia/Documents/App/vercel.json).
-6. In Vercel, set `VITE_API_URL` to the Render backend URL.
-7. Set `VITE_GEMINI_API_KEY` in Vercel.
-8. Redeploy the frontend after adding env vars.
-9. Open the live app and test login, registration, sessions, and messaging.
-
-## Recommended Production Values
-
-Frontend on Vercel:
-- `VITE_API_URL=https://your-backend-name.onrender.com`
-- `VITE_GEMINI_API_KEY=your_gemini_key`
-
-Backend on Render:
+Backend production variables:
+- `DATABASE_URL=your Supabase connection string`
 - `FRONTEND_URL=https://your-project-name.vercel.app`
 - `ALLOWED_ORIGINS=https://your-project-name.vercel.app`
 - `COOKIE_SAME_SITE=None`
 - `COOKIE_SECURE=true`
-- `DB_PATH=/opt/render/project/src/data/database.db`
 
-## If Login Fails After Deploy
+## Supabase
 
-Check these first:
-- `FRONTEND_URL` exactly matches the frontend URL, including `https://`
-- `ALLOWED_ORIGINS` includes the frontend URL
-- `COOKIE_SAME_SITE=None`
-- `COOKIE_SECURE=true`
-- The frontend is using the correct `VITE_API_URL`
+Use Supabase only for the PostgreSQL database.
 
-## Suggested Submission Setup For Your Professor
+You will need:
+- Project URL
+- Database password
+- Connection string
 
-For the smoothest review experience, give your professor:
-- the live frontend URL
-- a short demo video
+Important:
+- Use the PostgreSQL connection string from the Supabase dashboard
+- For hosted deployment, use the connection string with SSL enabled
+
+## First Deployment Checklist
+
+1. Push this project to GitHub.
+2. Create a Supabase project.
+3. Copy the Supabase PostgreSQL connection string.
+4. Deploy the backend to Render using [render.yaml](/c:/Users/Mawia/Documents/App/render.yaml).
+5. Add `DATABASE_URL`, `FRONTEND_URL`, and `ALLOWED_ORIGINS` in Render.
+6. Deploy the frontend to Vercel from the repo root.
+7. Add `VITE_API_URL` and `VITE_GEMINI_API_KEY` in Vercel.
+8. Open the live app and test registration, login, sessions, and chat.
+
+## APK Conversion
+
+This project can also be packaged as an Android app with Capacitor after hosting is live.
+
+Commands:
+
+```powershell
+npm run build
+npm run cap:sync
+npm run cap:android
+```
+
+The APK will use the same hosted backend URL as the web app.
+
+## Suggested Submission Setup
+
+For your professor, share:
+- the live Vercel frontend URL
 - one or two test accounts
-- a brief note that the backend is hosted on Render
+- a short note that the API is hosted separately

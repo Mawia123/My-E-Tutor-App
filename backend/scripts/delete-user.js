@@ -1,61 +1,25 @@
-const sqlite3 = require("sqlite3").verbose();
-const path = require("path");
-
-const dbPath = path.join(__dirname, "..", "database.db");
-const db = new sqlite3.Database(dbPath);
-
-const run = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.run(sql, params, function (err) {
-      if (err) reject(err);
-      else resolve(this);
-    });
-  });
-
-const all = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.all(sql, params, (err, rows) => {
-      if (err) reject(err);
-      else resolve(rows);
-    });
-  });
-
-const get = (sql, params = []) =>
-  new Promise((resolve, reject) => {
-    db.get(sql, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
-
-const closeDb = () =>
-  new Promise((resolve, reject) => {
-    db.close((err) => {
-      if (err) reject(err);
-      else resolve();
-    });
-  });
+const { query, get, all, pool } = require("../db");
+const { ensureSchema } = require("../schema");
 
 const refreshTutorStats = async (tutorId) => {
-  const stats = await get(
-    `SELECT
-      COUNT(CASE WHEN status IN ('ACCEPTED', 'COMPLETED') THEN 1 END) AS totalSessions,
-      AVG(CASE WHEN rating IS NOT NULL AND rating > 0 THEN rating END) AS averageRating
-     FROM sessions
-     WHERE tutorId = ?`,
-    [tutorId]
-  );
+  const stats = await get(`
+    SELECT
+      COUNT(*) FILTER (WHERE status IN ('ACCEPTED', 'COMPLETED')) AS total_sessions,
+      AVG(NULLIF(rating, 0)) AS average_rating
+    FROM sessions
+    WHERE tutor_id = $1
+  `, [String(tutorId)]);
 
-  await run(
-    `UPDATE users
-     SET totalSessions = ?, rating = ?
-     WHERE id = ?`,
-    [
-      stats?.totalSessions || 0,
-      stats?.averageRating || 0,
-      tutorId,
-    ]
-  );
+  await query(`
+    UPDATE users
+    SET total_sessions = $1,
+        rating = $2
+    WHERE id = $3
+  `, [
+    Number(stats?.total_sessions || 0),
+    Number(stats?.average_rating || 0),
+    String(tutorId),
+  ]);
 };
 
 const parseArgs = (argv) => {
@@ -96,6 +60,8 @@ const printUsage = () => {
 };
 
 const main = async () => {
+  await ensureSchema();
+
   const args = parseArgs(process.argv.slice(2));
 
   if (args.help || (!args.id && !args.email) || (args.id && args.email)) {
@@ -104,31 +70,31 @@ const main = async () => {
     return;
   }
 
-  const lookupField = args.id ? "id" : "email";
-  const lookupValue = args.id ? String(args.id) : String(args.email);
-  const user = await get(`SELECT * FROM users WHERE ${lookupField} = ?`, [lookupValue]);
+  const lookupField = args.id ? "id" : "LOWER(TRIM(email))";
+  const lookupValue = args.id ? String(args.id) : String(args.email).trim().toLowerCase();
+  const user = await get(`SELECT * FROM users WHERE ${lookupField} = $1`, [lookupValue]);
 
   if (!user) {
-    console.error(`User not found for ${lookupField}=${lookupValue}`);
+    console.error(`User not found for ${args.id ? "id" : "email"}=${lookupValue}`);
     process.exitCode = 1;
     return;
   }
 
   const relatedSessions = await all(
-    "SELECT * FROM sessions WHERE studentId = ? OR tutorId = ?",
-    [String(user.id), String(user.id)]
+    "SELECT * FROM sessions WHERE student_id = $1 OR tutor_id = $1",
+    [String(user.id)]
   );
   const relatedMessages = await all(
-    "SELECT * FROM messages WHERE senderId = ? OR receiverId = ?",
-    [String(user.id), String(user.id)]
+    "SELECT * FROM messages WHERE sender_id = $1 OR receiver_id = $1",
+    [String(user.id)]
   );
   const affectedTutorIds = [...new Set(
     relatedSessions
-      .map((session) => String(session.tutorId))
+      .map((session) => String(session.tutor_id))
       .filter((tutorId) => tutorId !== String(user.id))
   )];
 
-  console.log(`User: ${user.fullName || user.name || "(no name)"} <${user.email}>`);
+  console.log(`User: ${user.full_name || user.name || "(no name)"} <${user.email}>`);
   console.log(`Role: ${user.role}`);
   console.log(`ID: ${user.id}`);
   console.log(`Sessions to delete: ${relatedSessions.length}`);
@@ -142,20 +108,20 @@ const main = async () => {
     return;
   }
 
-  await run("BEGIN TRANSACTION");
+  const client = await pool.connect();
 
   try {
-    await run("DELETE FROM messages WHERE senderId = ? OR receiverId = ?", [String(user.id), String(user.id)]);
-    await run("DELETE FROM sessions WHERE studentId = ? OR tutorId = ?", [String(user.id), String(user.id)]);
-    await run("DELETE FROM users WHERE id = ?", [String(user.id)]);
-    await run("COMMIT");
+    await client.query("BEGIN");
+    await client.query("DELETE FROM users WHERE id = $1", [String(user.id)]);
+    await client.query("COMMIT");
   } catch (error) {
-    await run("ROLLBACK");
+    await client.query("ROLLBACK");
     throw error;
+  } finally {
+    client.release();
   }
 
   await Promise.all(affectedTutorIds.map((tutorId) => refreshTutorStats(tutorId)));
-
   console.log("");
   console.log("User deleted successfully.");
 };
@@ -166,5 +132,5 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await closeDb();
+    await pool.end();
   });
